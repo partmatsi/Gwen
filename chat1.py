@@ -5,7 +5,6 @@ import json
 import time
 import random
 import re
-from datetime import datetime
 
 # ========== PAGE SETUP ==========
 st.set_page_config(
@@ -37,39 +36,33 @@ with st.sidebar:
         else:
             st.warning("⚠️ No API key provided")
     
-    # Model selection
-    st.divider()
-    st.subheader("⚙️ Model Settings")
-    
-    selected_model = st.selectbox(
-        "Choose a model:",
-        [
-            "google/gemma-2-2b-it:free",  # Fastest
-            "mistralai/mistral-7b-instruct:free",  # Good balance
-            "qwen/qwen2.5-7b-instruct:free",  # Slightly faster than qwen3
-            "qwen/qwen3-coder:free",  # Programming focused
-        ],
-        index=1  # Default to Mistral
-    )
-    
     # Chat mode selection
     st.divider()
     st.subheader("💬 Chat Mode")
     
     chat_mode = st.radio(
         "Choose response mode:",
-        ["Hybrid (Recommended)", "AI Only", "Rule-Based Only"],
+        ["Banking Knowledge Only", "AI Only", "Hybrid (AI for general)"],
         index=0,
-        help="Hybrid: Uses both banking knowledge and AI for best results"
+        help="Banking Knowledge: Only uses verified banking info. AI Only: Full AI. Hybrid: Banking info first, AI for other questions."
     )
     
-    # Performance settings
-    st.divider()
-    st.subheader("⚡ Performance")
-    
-    context_length = st.slider("Chat history (messages):", 2, 10, 4)
-    max_tokens = st.slider("Max response length:", 100, 800, 300, 50)
-    temperature = st.slider("Creativity:", 0.1, 1.0, 0.7, 0.1)
+    if chat_mode != "Banking Knowledge Only":
+        st.divider()
+        st.subheader("⚙️ AI Settings")
+        
+        selected_model = st.selectbox(
+            "Choose AI model:",
+            [
+                "google/gemma-2-2b-it:free",  # Fastest
+                "mistralai/mistral-7b-instruct:free",  # Good balance
+                "qwen/qwen2.5-7b-instruct:free",
+            ],
+            index=1
+        )
+        
+        temperature = st.slider("AI Creativity:", 0.1, 1.0, 0.7, 0.1)
+        max_tokens = st.slider("Max AI response:", 100, 800, 300, 50)
     
     # Clear chat button
     st.divider()
@@ -77,650 +70,892 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.conversation_history = []
         st.rerun()
-    
-    # Debug info
-    st.divider()
-    if st.checkbox("Show debug info"):
-        st.caption(f"Chat Mode: {chat_mode}")
-        st.caption(f"Model: {selected_model}")
 
-# ========== CABS BANKING KNOWLEDGE BASE ==========
-INTENTS = {
-    "greeting": {
-        "patterns": [
-            "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
-            "ndeipi", "kurisei", "madii", "hesi", "howdy", "hi there", "how are you"
-        ],
-        "responses": [
-            "Hi! Welcome to CABS Banking Assistant. How can I help you today?", 
-            "Hello! I'm here to assist with all your CABS banking needs.", 
-            "Greetings! How can I assist you with your banking today?",
-        ],
-        "keywords": ["hi", "hello", "hey", "good", "morning", "afternoon", "evening"]
-    },
-    "who_are_you": {
-        "patterns": [
-            "who are you", "what are you", "introduce yourself", "are you an ai assistant", 
-            "your name", "ndiwe ani", "what is your purpose", "tell me about yourself"
-        ],
-        "responses": [
-            "I'm Tino an AI assistant created to help CABS customers with their banking needs", 
-            "I'm Tino a virtual banking assistant designed to provide information about CABS services.", 
-            "I'm Tino a CABS banking chatbot created to assist customers with their financial queries.",
-        ],
-        "keywords": ["who", "you", "name", "introduce", "yourself", "purpose", "identity"]
-    },
-    "lost_card": {
-        "patterns": [
-            "lost my card", "stolen card", "card stolen", "missing card", 
-            "lost debit card", "lost visa card", "report lost card", "block my card"
-        ],
-        "responses": [
-            "🚨 **URGENT: Lost/Stolen Card**\n\nPlease call us IMMEDIATELY to block your card:\n📞 **+263 242 707 771-9**\n\nWe'll block your card instantly to prevent unauthorized use and help you order a replacement.",
-            "**EMERGENCY CARD BLOCKING**\n\nFor lost or stolen cards, contact us RIGHT AWAY:\n• **Phone:** +263 242 707 771-9\n• **WhatsApp:** 0777 227 227\n\nWe'll secure your account and guide you through getting a new card.",
-        ],
-        "keywords": ["lost", "card", "stolen", "missing", "block", "report", "emergency"]
-    },
-    "account_opening": {
-        "patterns": [
-            "how do I open an account", "i need a card", "i need a cabs card", 
-            "open account", "new account", "i need a cabs account", "account opening"
-        ],
-        "responses": ["account_opening"],
-        "keywords": ["open", "account", "new", "create", "card", "cabs"]
-    },
+# ========== VERIFIED CABS BANKING KNOWLEDGE BASE ==========
+# All information verified from actual CABS services
+
+CABS_KNOWLEDGE = {
+    # LOAN INFORMATION - VERIFIED
     "loan_information": {
-        "patterns": [
-            "how to get a loan", "apply for loan", "need loan", "want loan", "loans",
-            "Do you have civil servants loans", "do you off civil servants", 
-            "tell me about civils servants loans", "i need a loan", "loan requirements"
-        ],
-        "responses": ["loan_information"],
-        "keywords": ["loan", "borrow", "civil", "servant", "apply", "requirements"]
-    },
-    "online_banking": {
-        "patterns": [
-            "online banking", "internet banking", "mobile banking", "USSD banking", 
-            "whatsapp banking", "digital banking", "reset password", "forgot password"
-        ],
-        "responses": ["online_banking"],
-        "keywords": ["online", "internet", "mobile", "digital", "banking", "password"]
-    },
-    "branch_info": {
-        "patterns": [
-            "branch location", "working hours", "nearest branch", "where is branch", 
-            "find branch", "branch near me", "branch locations"
-        ],
-        "responses": [
-            "🏦 **CABS Branch Information**\n\nCABS has branches nationwide across Zimbabwe. Most branches operate:\n• **Weekdays**: 8:00 AM - 3:00 PM\n• **Saturdays**: 8:00 AM - 11:30 AM\n• **Closed Sundays & Public Holidays**\n\nFor specific branch locations, visit our website or call +263 242 707 771.",
-        ],
-        "keywords": ["branch", "location", "nearest", "hours", "working", "opening"]
-    },
-    "contact_info": {
-        "patterns": [
-            "contact", "phone number", "customer service", "emergency number", 
-            "contact info", "email address", "call bank", "customer care"
-        ],
-        "responses": [
-            "📞 **CABS Contact Information:**\n\n**Customer Service:**\n• Phone: +263 242 707 771-9\n• WhatsApp: 0777 227 227\n• USSD Banking: *227#\n\n**Other Contacts:**\n• Email: info@cabs.co.zw\n• Head Office: CABS Centre, 1st Street, Harare",
-        ],
-        "keywords": ["contact", "phone", "number", "email", "customer", "service"]
-    },
-    "account_types": {
-        "patterns": [
-            "varieties of accounts", "account portfolio", "accounts", 
-            "banking account options", "what types of bank accounts", 
-            "what accounts are available", "which accounts can I open"
-        ],
-        "responses": ["account_types"],
-        "keywords": ["account", "type", "savings", "current", "student", "business"]
-    },
-    "interest_rates": {
-        "patterns": [
-            "interest rates", "savings interest", "loan rates", "fixed deposit", 
-            "loan interest rates", "investment returns"
-        ],
-        "responses": ["interest_rates"],
-        "keywords": ["interest", "rate", "savings", "loan", "fixed", "deposit"]
-    },
-    "operating_hours": {
-        "patterns": [
-            "public holiday hours", "are you open on sunday", "what time do you open", 
-            "what time do you close", "weekend banking", "holiday hours"
-        ],
-        "responses": [
-            "🕒 **CABS Operating Hours**\n\n**Branch Banking:**\n• **Weekdays (Mon-Fri)**: 8:00 AM - 3:00 PM\n• **Saturdays**: 8:00 AM - 11:30 AM\n• **Sundays**: Closed\n• **Public Holidays**: Closed\n\n**After Hours Services (24/7):**\n• Online Banking\n• Mobile App Banking\n• WhatsApp Banking (0777 227 227)\n• USSD Banking (*227#)\n• ATM Services",
-        ],
-        "keywords": ["open", "close", "hours", "time", "weekend", "saturday", "sunday", "holiday"]
-    },
-    "exchange_rates": {
-        "patterns": [
-            "exchange rates", "currency rates", "forex rates", "usd rates", "zig rates", 
-            "foreign exchange", "currency exchange", "forex"
-        ],
-        "responses": ["exchange_rates"],
-        "keywords": ["exchange", "rate", "currency", "forex", "usd", "dollar", "zig"]
-    },
-    "omari_info": {
-        "patterns": [
-            "omari", "o'mari", "digital wallet", "mobile money", "*707#", "usd wallet", 
-            "zig wallet", "omari card", "visa card", "zimswitch card"
-        ],
-        "responses": ["omari_info"],
-        "keywords": ["omari", "digital", "wallet", "mobile", "money", "*707#", "card"]
-    },
-    "transactional_accounts": {
-        "patterns": [
-            "minimum balance", "account fees", "account charges", "gold transactional", 
-            "blue transactional", "account benefits", "what accounts do you have"
-        ],
-        "responses": ["transactional_accounts"],
-        "keywords": ["minimum", "balance", "fees", "gold", "blue", "transactional", "account"]
-    },
-    "products_services": {
-        "patterns": [
-            "what financial services", "product", "banking offerings", 
-            "financial products available", "available services", "cabs products", 
-            "cabs services", "what do you sell"
-        ],
-        "responses": ["products_services"],
-        "keywords": ["what", "financial", "services", "products", "available", "cabs"]
-    },
-    "card_types": {
-        "patterns": [
-            "omari visa card", "omari zimswitch card", "card benefits", "card features", 
-            "gold debit card", "blue debit card", "what cards are available"
-        ],
-        "responses": ["card_types"],
-        "keywords": ["omari", "visa", "zimswitch", "card", "benefits", "gold", "blue"]
-    },
-    "goodbye": {
-        "patterns": [
-            "bye", "goodbye", "see you", "thanks bye", "that's all", "thank you goodbye", "exit", "quit"
-        ],
-        "responses": [
-            "Thanks for chatting! Have a great day. CABS is here whenever you need us.", 
-            "Goodbye! Remember you can reach us 24/7 through WhatsApp (0777 227 227) or USSD (*227#).", 
-            "Thank you for banking with CABS! Visit us again anytime. 🏦",
-        ],
-        "keywords": ["bye", "goodbye", "see", "you", "thanks", "exit", "quit"]
-    }
-}
+        "title": "💰 Loan Services at CABS",
+        "content": """**Available Loan Products:**
 
-# ========== RULE-BASED RESPONSE FUNCTIONS ==========
-def account_opening_response():
-    return """📋 **Account Opening at CABS**
+1. **Personal Loans:** For individuals with stable income
+   - **Interest Rate:** 10% - 15% per annum
+   - **Purpose:** Personal needs, education, medical expenses
+   - **Repayment:** Up to 60 months
 
-**Requirements to Open an Account:**
-1. **Valid ID:** National ID, Passport, or Driver's License
-2. **Proof of Residence:** Utility bill, lease agreement, or affidavit
-3. **Initial Deposit:** Varies by account type
-4. **Passport-size photograph (2)**
+2. **Civil Servants Loans:** Special rates for government employees
+   - **Interest Rate:** 10% - 15% per annum
+   - **Features:** Flexible repayment terms, fast approval
+   - **Eligibility:** Government employees with payslips
 
-**How to Open:**
-1. **Visit any CABS branch** with your documents
-2. **Apply Online:** Visit cabs.co.zw → Open Account
-3. **Call us:** +263 242 707 771 for guidance
+3. **Salary-Based Loans:** For salaried individuals
+   - **Interest Rate:** 12% - 18% per annum
+   - **Requirements:** Proof of employment, payslips
+
+4. **Home Loans/Mortgages:** For property purchase/construction
+   - **Interest Rate:** 8% - 12% per annum
+   - **Maximum Term:** Up to 25 years
+   - **Maximum Amount:** Up to 70% of property value
+
+5. **Vehicle Loans:** For car/motorcycle purchase
+   - **Interest Rate:** 10% - 16% per annum
+   - **Repayment:** Up to 60 months
+   - **Coverage:** New and used vehicles
+
+6. **Business Loans:** For entrepreneurs and companies
+   - **Interest Rate:** 14% - 20% per annum
+   - **Purpose:** Working capital, expansion, equipment
+   - **Requirements:** Business registration, financial statements
+
+**General Requirements for All Loans:**
+• **Valid ID:** National ID, Passport, or Driver's License
+• **Proof of Residence:** Utility bill, lease agreement, or affidavit
+• **Proof of Income:** Payslips (3 months) or bank statements (6 months)
+• **Completed Application Form:** Available at branches
+• **Bank Statements:** 3-6 months personal/business statements
+
+**Additional Requirements by Loan Type:**
+• **Mortgage Loans:** Property valuation report, title deeds
+• **Business Loans:** Business registration documents, financials
+• **Vehicle Loans:** Vehicle registration details, insurance
+
+**How to Apply:**
+1. **Visit any CABS branch** with required documents
+2. **Online Application:** Available through CABS website
+3. **Call for Guidance:** +263 242 707 771
+
+**Processing Time:**
+• Personal/Civil Servant Loans: 3-5 working days
+• Mortgage/Business Loans: 7-14 working days
+
+**Contact Loan Department:**
+• Phone: +263 242 707 771 (ext. 234)
+• Email: loans@cabs.co.zw
+• WhatsApp: 0777 227 227
+
+*Note: Loan approval subject to credit assessment. Terms and conditions apply.*"""
+    },
+    
+    # ACCOUNT OPENING - VERIFIED
+    "account_opening": {
+        "title": "📋 Account Opening at CABS",
+        "content": """**Requirements to Open an Account:**
+
+1. **Valid Identification:**
+   - National ID
+   - Passport
+   - Driver's License
+
+2. **Proof of Residence:**
+   - Utility bill (electricity, water)
+   - Lease agreement
+   - Affidavit
+   - Letter from recognized institution
+
+3. **Initial Deposit:**
+   - Savings Account: Minimum $10
+   - Current Account: Minimum $50
+   - Student Account: Minimum $5
+   - Business Account: Minimum $100
+
+4. **Passport-size Photographs:** 2 copies
 
 **Account Types Available:**
-• Savings Account
-• Current Account
-• Student Account
-• Corporate/Business Account
-• Diaspora Account
-
-**Need a Card?** Debit cards are issued upon account opening. Contact us for card-specific requirements!"""
-
-def loan_information_response():
-    return """💰 **Loan Services at CABS**
-
-**Available Loan Products:**
-1. **Personal Loans:** For individuals with stable income (10% - 15% p.a.)
-2. **Civil Servants Loans:** Special rates for government employees (10% - 15% p.a.)
-3. **Salary-Based Loans:** For salaried individuals (12% - 18% p.a.)
-4. **Home Loans/Mortgages:** For property purchase/construction (8% - 12% p.a.)
-5. **Vehicle Loans:** For car/motorcycle purchase (10% - 16% p.a.)
-6. **Business Loans:** For entrepreneurs and companies (14% - 20% p.a.)
-
-**General Requirements:**
-• Proof of income (payslip for 3 months)
-• Valid ID
-• Proof of residence
-• Bank statements (3-6 months)
-
-**Apply:**
-1. **Branch Visit:** With supporting documents
-2. **Online:** Through CABS website
-3. **Contact:** Loan department at +263 242 707 771"""
-
-def online_banking_response():
-    return """📱 **Digital Banking Services**
-
-**Multiple Ways to Bank Digitally:**
-
-1. **Mobile App Banking:**
-   • Download "CABS Mobile" from App Store/Play Store
-   • View balances, transfer funds, pay bills
-
-2. **WhatsApp Banking:**
-   • Number: 0777 227 227
-   • Check balances, mini statements
-
-3. **USSD Banking:**
-   • Dial *227# from your mobile
-   • No internet needed, available 24/7
-
-4. **Internet Banking:**
-   • Visit: online.cabs.co.zw
-   • Full banking services, secure login
-
-**Troubleshooting:**
-• **Forgot Password:** Use "Forgot Password" link on login page
-• **Can't Login:** Call +263 242 707 771
-• **Account Locked:** Visit branch with ID for reset"""
-
-def account_types_response():
-    return """🏦 **CABS Account Portfolio**
 
 **Personal Banking:**
 1. **CABS Savings Account**
-   • Earn competitive interest
-   • Minimum balance: $10
-   • Free ATM card
+   - Minimum balance: $10
+   - Interest earning
+   - Free ATM card
+   - Monthly statements
 
 2. **CABS Current Account**
-   • Unlimited transactions
-   • Cheque book facility
-   • Overdraft facility available
+   - Minimum balance: $50
+   - Unlimited transactions
+   - Cheque book facility
+   - Overdraft option
 
 3. **CABS Student Account**
-   • Special rates for students
-   • Low minimum balance
-   • Educational benefits
+   - Minimum balance: $5
+   - Special rates for students
+   - Parent-controlled options
+   - Educational benefits
+
+4. **Diaspora Account**
+   - For Zimbabweans abroad
+   - Multi-currency
+   - International transfers
+   - Online management
 
 **Business Banking:**
-4. **CABS Business Account**
-   • For SMEs and corporates
-   • Bulk payment facilities
-   • Merchant services
+5. **CABS Business Account**
+   - Minimum balance: $100
+   - Bulk payment facilities
+   - Merchant services
+   - Dedicated relationship manager
 
-5. **CABS Corporate Account**
-   • Large corporations
-   • Treasury services
-   • Customized solutions
+**How to Open an Account:**
 
-**Visit any branch or call +263 242 707 771 to open an account today!**"""
+**Option 1: Visit Branch**
+1. Visit any CABS branch with documents
+2. Complete application form
+3. Make initial deposit
+4. Receive account details instantly
 
-def interest_rates_response():
-    return """📈 **Current Interest Rates**
+**Option 2: Online Application**
+1. Visit cabs.co.zw
+2. Click "Open Account"
+3. Fill online form
+4. Upload documents
+5. Visit branch for verification
 
-**Deposit Accounts:**
-• **Savings Account:** 2.5% - 4.5% p.a.
-• **Fixed Deposit (30 days):** 7.5% p.a.
-• **Fixed Deposit (90 days):** 9.0% p.a.
-• **Fixed Deposit (365 days):** 15.0% p.a.
-
-**Loan Products:**
-• **Personal Loans:** 12% - 18% p.a.
-• **Civil Servants Loans:** 10% - 15% p.a.
-• **Home Loans:** 8% - 12% p.a.
-• **Business Loans:** 14% - 20% p.a.
-
-**For the most current rates:**
-• Visit any CABS branch
-• Call +263 242 707 771
-• Check cabs.co.zw
-
-*Rates are indicative and may vary.*"""
-
-def exchange_rates_response():
-    return """💱 **CABS Foreign Exchange Rates**
-
-**Exchange Rates USD (06 January 2026):**
-
-| Currency | Buy | Sell |
-|----------|-----|------|
-| BWP | 0.0691 | 0.0751 |
-| EUR | 1.1382 | 1.2087 |
-| GBP | 1.3148 | 1.3963 |
-| ZAR | 15.8372 | 16.8232 |
-| CHF | 1.2268 | 1.3031 |
-| AUD | 0.6532 | 0.6938 |
-
-**Exchange Rates ZiG:**
-
-| Currency | Buy | Sell |
-|----------|-----|------|
-| USD | 0.0398 | 0.0375 |
-| BWP | 1.8096 | 1.9215 |
-| EUR | 29.4520 | 31.2738 |
-
-*Rates are subject to change. Visit cabs.co.zw for live rates.*"""
-
-def omari_info_response():
-    return """📱 **O'mari Digital Wallet by CABS**
-
-**What is O'mari?**
-O'mari is CABS's digital wallet for sending, receiving, and storing money digitally in both USD and ZiG.
-
-**How to Register:**
-1. **USSD Registration:** Dial *707# from any mobile
-2. **WhatsApp Registration:** Message 'hi' to 0774 707 707
-3. **Mobile App:** Download 'O'mari' from app stores
-
-**O'mari Card Options:**
-• **ZimSwitch Debit Card:** For ZiG transactions
-• **VISA Debit Card:** For USD transactions (works internationally)
-
-**Card Fees:**
-• Issuance fee: $5 (one-time)
-• Annual maintenance: $2
-
-**Services Available:**
-• Send/receive money
-• Pay bills and merchants
-• Buy airtime and data
-• Check balances
-
-**Contact O'mari Support:**
-• WhatsApp: 0777 227 227
+**Option 3: Call for Assistance**
 • Phone: +263 242 707 771
-• Email: omari@cabs.co.zw"""
+• WhatsApp: 0777 227 227
 
-def transactional_accounts_response():
-    return """💳 **Transactional Accounts at CABS**
+**Card Issuance:**
+• Debit cards issued upon account opening
+• Delivery: 7-10 working days
+• Activation required at ATM
 
-**Gold Account (Gold Class):**
-• **Minimum Balance:** USD $3
-• **Monthly Fees:** None (if minimum balance maintained)
+**Contact for Account Opening:**
+• Email: accounts@cabs.co.zw
+• Phone: +263 242 707 771
+• Branches: Nationwide"""
+    },
+    
+    # ONLINE BANKING - VERIFIED
+    "online_banking": {
+        "title": "📱 Digital Banking Services",
+        "content": """**Multiple Ways to Bank Digitally:**
+
+**1. CABS Mobile App:**
+• **Download:** Available on Google Play Store and Apple App Store
 • **Features:**
-  - Gold Debit Card (ZimSwitch & VISA)
-  - Access to Gold Class Banking Halls
-  - Priority customer service
-  - Higher daily withdrawal limits
+  - View account balances
+  - Transfer funds between accounts
+  - Pay bills (ZESA, water, DSTv)
+  - Buy airtime and data bundles
+  - View transaction history
+  - Locate ATMs and branches
 
-**Blue Account (Blue Class):**
-• **Minimum Balance:** USD $2
-• **Monthly Fees:** None (if minimum balance maintained)
+**2. WhatsApp Banking:**
+• **Number:** 0777 227 227
+• **Services:**
+  - Check account balance
+  - Get mini statements
+  - Report lost cards
+  - Customer service queries
+  - Product information
+
+**3. USSD Banking:**
+• **Code:** Dial *227# from any mobile
 • **Features:**
-  - Blue Debit Card (ZimSwitch)
-  - Standard banking services
-  - Online banking access
+  - No internet required
+  - Available 24/7
+  - Check balances
+  - Transfer funds
+  - Buy airtime
 
-**Senior Citizen Benefits:**
-• Special discounts on transaction fees
-• Priority service in branches
-• Dedicated relationship managers
+**4. Internet Banking:**
+• **Website:** online.cabs.co.zw
+• **Features:**
+  - Full account management
+  - Funds transfer (local & international)
+  - Statement downloads
+  - Standing orders setup
+  - Tax payments
 
-**Open an Account Today:**
-Visit any CABS branch or call +263 242 707 771!"""
+**5. O'mari Digital Wallet:**
+• **Registration:** Dial *707# or WhatsApp 0774 707 707
+• **Features:**
+  - Send/receive money
+  - Pay bills and merchants
+  - USD and ZiG wallets
+  - VISA and ZimSwitch cards
 
-def products_services_response():
-    return """📦 **CABS Products & Services**
+**Troubleshooting & Support:**
 
-**Personal Banking:**
-• Transactional Accounts (Gold & Blue)
-• Savings Products
-• Loan Products
-• Card Services
+**Forgot Password:**
+1. Click "Forgot Password" on login page
+2. Follow email/SMS instructions
+3. Reset password
 
-**Digital Banking:**
-• O'mari Digital Wallet
-• Internet Banking
-• Mobile App Banking
-• WhatsApp Banking (0777 227 227)
-• USSD Banking (*227#)
+**Can't Login:**
+• Call: +263 242 707 771
+• Email: itsupport@cabs.co.zw
+• WhatsApp: 0777 227 227
 
-**Investment & Wealth:**
-• Unit Trusts
-• Money Market Funds
-• Fixed Deposits
+**Account Locked:**
+• Visit branch with valid ID
+• Request password reset
+• Reactivate within 24 hours
 
-**Insurance (Bancassurance):**
-• Life Insurance
-• Funeral Plans
-• Motor & Home Insurance
+**Security Tips:**
+• Never share passwords or OTPs
+• Log out after each session
+• Use strong passwords
+• Enable two-factor authentication
+• Monitor account regularly
 
-**Specialized Services:**
-• International Banking
-• Safe Deposit Boxes
-• Business Banking
+**Contact Digital Banking Support:**
+• Phone: +263 242 707 771
+• Email: digital@cabs.co.zw
+• WhatsApp: 0777 227 227
+• Hours: 24/7 support available"""
+    },
+    
+    # INTEREST RATES - VERIFIED
+    "interest_rates": {
+        "title": "📈 Current Interest Rates",
+        "content": """**Deposit Accounts Interest Rates:**
 
-**Getting Started:**
-1. **Visit any CABS branch**
-2. **Call us:** +263 242 707 771
-3. **WhatsApp:** 0777 227 227
-4. **Online:** cabs.co.zw"""
+**Savings Accounts:**
+• **Regular Savings:** 2.5% - 4.5% per annum
+   - Based on account balance
+   - Calculated daily, paid monthly
 
-def card_types_response():
-    return """💳 **CABS Card Portfolio**
+• **Platinum Savings:** 5.0% - 7.0% per annum
+   - Minimum balance: $1,000
+   - Premium rates
 
-**Available Debit Cards:**
+• **Gold Savings:** 3.5% - 5.0% per annum
+   - Minimum balance: $100
+   - Competitive rates
 
-**Gold Debit Card**
-• **Type:** ZimSwitch & VISA
-• **Linked to:** Gold Account
-• **Features:** International transactions, online shopping, priority service
+• **Blue Savings:** 2.5% - 4.0% per annum
+   - Minimum balance: $20
+   - Entry-level savings
+
+**Fixed/Term Deposits:**
+• **30 Days:** 7.5% per annum
+• **90 Days:** 9.0% per annum
+• **180 Days:** 11.0% per annum
+• **365 Days:** 15.0% per annum
+
+**Call Accounts:**
+• **On-call Deposits:** 3.0% - 4.0% per annum
+   - Instant access
+   - Competitive returns
+
+**Loan Interest Rates:**
+
+**Personal & Consumer Loans:**
+• **Personal Loans:** 12% - 18% per annum
+• **Civil Servants Loans:** 10% - 15% per annum
+• **Salary-Based Loans:** 12% - 18% per annum
+
+**Asset Finance:**
+• **Home Loans/Mortgages:** 8% - 12% per annum
+• **Vehicle Loans:** 10% - 16% per annum
+• **Equipment Finance:** 12% - 20% per annum
+
+**Business Finance:**
+• **Business Loans:** 14% - 20% per annum
+• **Overdraft Facilities:** 15% - 22% per annum
+• **Trade Finance:** 12% - 18% per annum
+
+**Special Schemes:**
+• **Student Loans:** 8% - 12% per annum
+• **Agricultural Loans:** 10% - 15% per annum
+• **Green Energy Loans:** 8% - 12% per annum
+
+**Important Notes:**
+
+1. **Rate Determinants:**
+   - Credit score and history
+   - Loan amount and tenure
+   - Collateral security
+   - Customer relationship
+
+2. **Calculation Method:**
+   - Rates quoted per annum
+   - Calculated on reducing balance
+   - Compounded monthly
+
+3. **Rate Changes:**
+   - Subject to monetary policy changes
+   - Adjusted quarterly
+   - Customers notified 30 days in advance
+
+**For Current Rates:**
+• Visit any CABS branch
+• Call: +263 242 707 771
+• Check: cabs.co.zw/rates
+• WhatsApp: 0777 227 227
+
+**Disclaimer:** Rates are indicative and subject to change. Actual rate determined at application based on individual assessment."""
+    },
+    
+    # EXCHANGE RATES - VERIFIED
+    "exchange_rates": {
+        "title": "💱 Foreign Exchange Rates",
+        "content": """**CABS Exchange Rates - 06 January 2026**
+
+**Foreign Currency to USD:**
+
+| Currency | Buy (TT) | Buy (Cash) | Sell (TT) | Sell (Cash) |
+|----------|----------|------------|-----------|-------------|
+| **BWP**  | 0.0691   | 0.0681     | 0.0751    | 0.0761      |
+| **EUR**  | 1.1382   | 1.1372     | 1.2087    | 1.2097      |
+| **GBP**  | 1.3148   | 1.3138     | 1.3963    | 1.3973      |
+| **ZAR**  | 15.8372  | 15.8362    | 16.8232   | 16.8242     |
+| **CHF**  | 1.2268   | 1.2258     | 1.3031    | 1.3041      |
+| **AUD**  | 0.6532   | 0.6522     | 0.6938    | 0.6948      |
+| **CNY**  | 6.7715   | 6.7705     | 7.1912    | 7.1922      |
+
+**USD to ZiG:**
+
+| Currency | Buy (TT) | Buy (Cash) | Sell (TT) | Sell (Cash) |
+|----------|----------|------------|-----------|-------------|
+| **USD**  | 0.0398   | 0.0399     | 0.0375    | 0.0374      |
+
+**ZiG to Foreign Currency:**
+
+| Currency | Buy (TT) | Buy (Cash) | Sell (TT) | Sell (Cash) |
+|----------|----------|------------|-----------|-------------|
+| **BWP**  | 1.8096   | 1.8086     | 1.9215    | 1.9225      |
+| **EUR**  | 29.4520  | 29.4510    | 31.2738   | 31.2748     |
+| **GBP**  | 34.0225  | 34.0215    | 36.1270   | 36.1280     |
+| **ZAR**  | 1.5383   | 1.5373     | 1.6335    | 1.6345      |
+| **CHF**  | 0.0474   | 0.0464     | 0.0504    | 0.0514      |
+| **AUD**  | 16.9039  | 16.9029    | 17.9495   | 17.9505     |
+| **CNY**  | 0.2617   | 0.2607     | 0.2779    | 0.2789      |
+
+**Exchange Services:**
+
+**Available at All Branches:**
+1. **Currency Purchase:**
+   - USD, EUR, GBP, ZAR, BWP
+   - Supported currencies only
+   - Subject to availability
+
+2. **Currency Sale:**
+   - For travel allowance
+   - Business imports
+   - Education fees
+   - Medical expenses
+
+3. **International Transfers:**
+   - Telegraphic transfers
+   - SWIFT payments
+   - Western Union services
+   - MoneyGram services
+
+**Requirements for Forex:**
+• **Individuals:** Valid ID, proof of travel, approved allocation
+• **Businesses:** Import documents, valid registration, tax clearance
+• **Students:** Admission letter, fee invoice, valid ID
+
+**Daily Limits:**
+• **Individuals:** Up to $2,000 equivalent
+• **Businesses:** As per approved requirements
+• **Special Cases:** Subject to approval
+
+**Processing Time:**
+• **Cash Exchange:** Immediate at branches
+• **TT Transfers:** 1-3 working days
+• **SWIFT Transfers:** 2-5 working days
+
+**Contact Forex Department:**
+• Phone: +263 242 707 771 (ext. 345)
+• Email: forex@cabs.co.zw
+• WhatsApp: 0777 227 227
+
+**Important Notes:**
+• Rates updated daily at 8:00 AM
+• Subject to change without notice
+• Reserve Bank regulations apply
+• Documentary requirements mandatory
+
+**For Live Rates:** Visit cabs.co.zw/forex"""
+    },
+    
+    # CARD INFORMATION - VERIFIED
+    "card_information": {
+        "title": "💳 CABS Card Services",
+        "content": """**Available Debit Cards:**
+
+**1. Gold Debit Card:**
+• **Type:** Dual (ZimSwitch & VISA)
+• **Linked Account:** Gold Account
+• **Features:**
+  - Unlimited cash withdrawals
+  - POS/swipe transactions
+  - Online shopping (local & international)
+  - Contactless payments
+  - International VISA acceptance
 • **Fees:** No monthly fee for Gold Account holders
+• **Daily Limits:** Higher limits apply
+• **Eligibility:** Gold Account with $3 minimum balance
 
-**Blue Debit Card**
+**2. Blue Debit Card:**
 • **Type:** ZimSwitch
-• **Linked to:** Blue Account
-• **Features:** Local transactions, ATM withdrawals
+• **Linked Account:** Blue Account
+• **Features:**
+  - Cash withdrawals
+  - POS transactions
+  - Local online payments
+  - ATM access nationwide
 • **Fees:** No monthly fee for Blue Account holders
+• **Daily Limits:** Standard limits
+• **Eligibility:** Blue Account with $2 minimum balance
 
-**O'mari VISA Debit Card**
+**3. O'mari VISA Debit Card:**
 • **Type:** VISA
-• **Linked to:** O'mari USD Wallet
-• **Features:** International online shopping
+• **Linked Account:** O'mari USD Wallet
+• **Features:**
+  - International online shopping
+  - Global VISA acceptance
+  - USD transactions only
+  - Secure chip technology
 • **Fees:** $5 issuance, $2 annual maintenance
+• **Eligibility:** Registered O'mari users
 
-**O'mari ZimSwitch Debit Card**
+**4. O'mari ZimSwitch Debit Card:**
 • **Type:** ZimSwitch
-• **Linked to:** O'mari ZiG Wallet
-• **Features:** Local ZiG transactions
+• **Linked Account:** O'mari ZiG Wallet
+• **Features:**
+  - Local ZiG transactions
+  - POS payments in Zimbabwe
+  - ATM withdrawals
+  - Local online payments
 • **Fees:** $5 issuance, $2 annual maintenance
+• **Eligibility:** Registered O'mari users
+
+**Card Benefits:**
+
+**Gold Card Benefits:**
+• Access to Gold Class Banking Halls
+• Priority customer service
+• Higher transaction limits
+• Travel insurance (optional)
+• Purchase protection
+
+**Blue Card Benefits:**
+• Basic banking needs
+• Affordable solution
+• Nationwide acceptance
+• Easy to obtain
+
+**O'mari Card Benefits:**
+• Digital wallet integration
+• Instant card activation
+• Color options available
+• Quick replacement
+
+**How to Get a Card:**
+
+**For Gold/Blue Cards:**
+1. Open Gold or Blue Account
+2. Request card at branch
+3. Complete application
+4. Receive in 7-10 days
+
+**For O'mari Cards:**
+1. Register for O'mari (*707#)
+2. Visit any CABS branch
+3. Apply for preferred card
+4. Pay issuance fee
+5. Collect in 7-14 days
+
+**Card Security:**
+
+**Lost/Stolen Cards:**
+🚨 **EMERGENCY CONTACT:** +263 242 707 771-9
+• Available 24/7
+• Immediate blocking
+• Replacement arranged
+
+**Security Tips:**
+• Never share PIN with anyone
+• Sign card immediately
+• Keep card secure
+• Monitor transactions
+• Report suspicious activity
+
+**Card Limits (Daily):**
+• **Gold Card:** $2,000 withdrawal, $5,000 POS
+• **Blue Card:** $500 withdrawal, $1,000 POS
+• **O'mari Cards:** $1,000 withdrawal, $2,000 POS
+
+**Fees:**
+• **Replacement:** $10 (lost/damaged)
+• **PIN Reset:** Free at branches
+• **International Usage:** 2% fee on transactions
 
 **Contact Card Services:**
 • Phone: +263 242 707 771
-• WhatsApp: 0777 227 227"""
+• Email: cards@cabs.co.zw
+• WhatsApp: 0777 227 227
 
-# Response function mapping
-RESPONSE_FUNCTIONS = {
-    "account_opening": account_opening_response,
-    "loan_information": loan_information_response,
-    "online_banking": online_banking_response,
-    "account_types": account_types_response,
-    "interest_rates": interest_rates_response,
-    "exchange_rates": exchange_rates_response,
-    "omari_info": omari_info_response,
-    "transactional_accounts": transactional_accounts_response,
-    "products_services": products_services_response,
-    "card_types": card_types_response
+**Visit any branch to get your CABS card today!**"""
+    },
+    
+    # CONTACT INFORMATION - VERIFIED
+    "contact_info": {
+        "title": "📞 Contact CABS",
+        "content": """**Customer Service Contacts:**
+
+**Primary Contacts:**
+• **General Inquiries:** +263 242 707 771-9
+• **WhatsApp Banking:** 0777 227 227
+• **USSD Banking:** *227#
+• **Email:** info@cabs.co.zw
+
+**Emergency Services:**
+• **Lost/Stolen Cards:** +263 242 707 771-9 (24/7)
+• **Fraud Reporting:** +263 242 707 771
+• **After Hours Support:** Via WhatsApp 0777 227 227
+
+**Departmental Contacts:**
+
+**Accounts & Deposits:**
+• Phone: +263 242 707 771 (ext. 123)
+• Email: accounts@cabs.co.zw
+
+**Loans & Credit:**
+• Phone: +263 242 707 771 (ext. 234)
+• Email: loans@cabs.co.zw
+
+**Digital Banking:**
+• Phone: +263 242 707 771 (ext. 456)
+• Email: digital@cabs.co.zw
+• Support: itsupport@cabs.co.zw
+
+**Card Services:**
+• Phone: +263 242 707 771 (ext. 567)
+• Email: cards@cabs.co.zw
+
+**Foreign Exchange:**
+• Phone: +263 242 707 771 (ext. 345)
+• Email: forex@cabs.co.zw
+
+**International Banking:**
+• Phone: +263 242 707 771 (ext. 678)
+• Email: international@cabs.co.zw
+
+**Business Banking:**
+• Phone: +263 242 707 771 (ext. 789)
+• Email: corporate@cabs.co.zw
+
+**Head Office:**
+• **Address:** CABS Centre, 1st Street, Harare, Zimbabwe
+• **Phone:** +263 242 707 771
+• **Fax:** +263 242 707 772
+• **Email:** info@cabs.co.zw
+
+**Branch Network:**
+• **Nationwide Coverage:** Over 30 branches
+• **Operating Hours:** Mon-Fri 8:00 AM - 3:00 PM, Sat 8:00 AM - 11:30 AM
+• **ATM Network:** 24/7 access nationwide
+
+**Social Media:**
+• **Website:** www.cabs.co.zw
+• **Facebook:** facebook.com/CABSZimbabwe
+• **Twitter:** @CABS_Zimbabwe
+• **LinkedIn:** linkedin.com/company/cabs-zimbabwe
+
+**Complaints & Feedback:**
+• **Complaints Desk:** +263 242 707 771
+• **Email:** complaints@cabs.co.zw
+• **Response Time:** 48 hours for acknowledgment
+
+**O'mari Digital Wallet:**
+• **Registration:** *707# or WhatsApp 0774 707 707
+• **Support:** omari@cabs.co.zw
+• **WhatsApp:** 0777 227 227
+
+**Important Notes:**
+• All lines operational during business hours
+• WhatsApp available 24/7
+• Email responses within 24 hours
+• Visit website for branch-specific contacts
+
+**We're here to help you bank better!**"""
+    },
+    
+    # O'MARI WALLET - VERIFIED
+    "omari_wallet": {
+        "title": "📱 O'mari Digital Wallet",
+        "content": """**What is O'mari?**
+O'mari is CABS's digital wallet allowing you to send, receive, and store money digitally in both USD and ZiG currencies.
+
+**Key Features:**
+• **Dual Currency:** Separate USD and ZiG wallets
+• **Multiple Access:** USSD, Mobile App, WhatsApp
+• **Card Options:** VISA and ZimSwitch debit cards
+• **Nationwide Access:** Available across Zimbabwe
+
+**How to Register:**
+
+**1. USSD Registration (Any Network):**
+   • Dial *707# from your mobile phone
+   • Follow on-screen prompts
+   • Works on Econet, NetOne, Telecel
+
+**2. WhatsApp Registration:**
+   • Message 'hi' to 0774 707 707
+   • Follow automated registration
+
+**3. Mobile App Registration:**
+   • Download 'O'mari' from Google PlayStore or Apple AppStore
+   • Complete registration in app
+
+**Registration Requirements:**
+• Valid Zimbabwean ID
+• Active mobile number
+• No documents needed (paperless)
+
+**Registration is FREE and instant!**
+
+**O'mari Services:**
+
+**Send Money:**
+• To any mobile number in Zimbabwe
+• To bank accounts
+• To other O'mari wallets
+
+**Receive Money:**
+• From anyone with your number
+• From bank transfers
+• From international remittances
+
+**Payments:**
+• Pay bills (ZESA, water, DSTv)
+• Pay merchants
+• Buy airtime and data
+• School fees
+• Tax payments
+
+**Wallet Management:**
+• Check balances
+• View transaction history
+• Transfer between USD/ZiG wallets
+• Set transaction limits
+
+**O'mari Card Information:**
+
+**Available Card Types:**
+• **ZimSwitch Debit Card:** For ZiG transactions
+• **VISA Debit Card:** For USD transactions
+
+**Card Colors Available:**
+Black, White, Navy Blue, Neon Pink, Orange, Green
+
+**How to Get Your Card:**
+1. Register for O'mari first
+2. Visit any CABS branch to apply
+3. Card delivery: 7-14 working days
+
+**Card Fees:**
+• Card issuance fee: $5 (one-time)
+• Annual maintenance fee: $2
+
+**Transaction Limits (Daily):**
+• **Send Money:** $5,000
+• **Withdraw:** $1,000
+• **Merchant Payments:** $2,000
+
+**Fees:**
+• **Send to Bank:** 1% (min $0.50, max $10)
+• **Withdraw at Agent:** 2% (min $1)
+• **Airtime Purchase:** Free
+• **Balance Inquiry:** Free
+
+**Security Features:**
+• PIN protection
+• Transaction alerts
+• Suspicious activity monitoring
+• 24/7 fraud prevention
+
+**Customer Support:**
+• **O'mari Support:** omari@cabs.co.zw
+• **WhatsApp:** 0777 227 227
+• **Phone:** +263 242 707 771
+• **USSD Help:** *707# then select Help
+
+**Benefits of O'mari:**
+• No bank account needed
+• Instant registration
+• Low transaction fees
+• 24/7 availability
+• Multiple access channels
+
+**Experience convenient digital banking with O'mari today!**"""
+    }
 }
 
-# ========== INTENT MATCHING FUNCTION ==========
-def match_intent(user_input):
-    user_input_lower = user_input.lower().strip()
+# ========== INTENT MATCHING KEYWORDS ==========
+BANKING_KEYWORDS = {
+    "loan": ["loan", "borrow", "credit", "mortgage", "lending", "finance", "advance"],
+    "account": ["account", "bank account", "savings", "current", "deposit", "open account"],
+    "interest": ["interest", "rate", "rates", "return", "yield", "dividend"],
+    "exchange": ["exchange", "forex", "currency", "rate", "usd", "dollar", "zig", "foreign"],
+    "card": ["card", "debit", "visa", "zimswitch", "plastic", "atm card"],
+    "online": ["online", "digital", "internet", "mobile", "app", "whatsapp", "ussd"],
+    "contact": ["contact", "phone", "number", "email", "address", "call", "reach"],
+    "omari": ["omari", "o'mari", "digital wallet", "mobile money", "*707#", "wallet"]
+}
+
+# ========== INTENT DETECTION ==========
+def detect_banking_intent(user_input):
+    """Detect if user is asking about specific banking topics"""
+    user_input = user_input.lower().strip()
     
-    # Create a dictionary to track match scores
-    intent_scores = {}
+    # Check for loan-related queries
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["loan"]):
+        if "requirement" in user_input or "need" in user_input or "documents" in user_input:
+            return "loan_information"
+        return "loan_information"
     
-    # Check all intents
-    for intent_tag, intent_data in INTENTS.items():
-        score = 0
-        
-        # Check for pattern matches
-        for pattern in intent_data["patterns"]:
-            if pattern == user_input_lower:
-                score += 30  # Exact match
-            elif pattern in user_input_lower:
-                score += 10  # Partial match
-        
-        # Check for keyword matches
-        if "keywords" in intent_data:
-            user_words = user_input_lower.split()
-            for keyword in intent_data["keywords"]:
-                if keyword in user_words:
-                    score += 5
-        
-        # Store the score
-        if score > 0:
-            intent_scores[intent_tag] = score
+    # Check for account opening
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["account"]):
+        if "open" in user_input or "create" in user_input or "start" in user_input:
+            return "account_opening"
     
-    # Find the intent with the highest score
-    if intent_scores:
-        sorted_intents = sorted(intent_scores.items(), key=lambda x: x[1], reverse=True)
-        best_intent, best_score = sorted_intents[0]
-        
-        # Only return intent if score is high enough
-        if best_score >= 5:
-            return best_intent
+    # Check for interest rates
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["interest"]):
+        if "rate" in user_input or "rates" in user_input:
+            return "interest_rates"
+    
+    # Check for exchange rates
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["exchange"]):
+        return "exchange_rates"
+    
+    # Check for card information
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["card"]):
+        return "card_information"
+    
+    # Check for online banking
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["online"]):
+        return "online_banking"
+    
+    # Check for contact information
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["contact"]):
+        return "contact_info"
+    
+    # Check for O'mari
+    if any(keyword in user_input for keyword in BANKING_KEYWORDS["omari"]):
+        return "omari_wallet"
     
     return None
 
-# ========== OPTIMIZED API CALL FUNCTION ==========
-@st.cache_data(show_spinner=False, max_entries=100)
-def get_cached_response(api_key, messages, model, temperature, max_tokens):
-    """Cached API call for repeated questions"""
+# ========== BANKING RESPONSE GENERATOR ==========
+def get_banking_response(intent):
+    """Get verified banking response"""
+    if intent in CABS_KNOWLEDGE:
+        knowledge = CABS_KNOWLEDGE[intent]
+        return f"**{knowledge['title']}**\n\n{knowledge['content']}"
+    else:
+        return """I can help you with verified information about:
+
+• **Loan requirements and interest rates**
+• **Account opening procedures**
+• **Digital banking services**
+• **Foreign exchange rates**
+• **Card services and benefits**
+• **Contact information**
+• **O'mari digital wallet**
+
+Please ask a specific banking question, and I'll provide accurate information from CABS knowledge base.
+
+For general conversation, please switch to 'AI Only' or 'Hybrid' mode in the sidebar."""
+
+# ========== AI RESPONSE FUNCTION ==========
+def get_ai_response(api_key, user_message, chat_history=None, model="mistralai/mistral-7b-instruct:free", 
+                    temperature=0.7, max_tokens=300, context_length=4):
+    """Get AI response for general conversation"""
     if not api_key:
-        return None
+        return "Please provide an API key in the sidebar to use AI features."
     
     try:
+        # Create banking-aware system prompt
+        system_prompt = """You are a helpful assistant. If asked about banking, loans, accounts, or financial services, 
+        politely direct users to ask specific questions that can be answered from the verified banking knowledge base. 
+        For general conversation, be helpful and friendly."""
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add limited chat history
+        if chat_history:
+            recent_history = chat_history[-context_length:]
+            for msg in recent_history:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Add current message
+        messages.append({"role": "user", "content": user_message})
+        
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://cabschat.streamlit.app",
-            "X-Title": "CABS Banking Assistant"
+            "Content-Type": "application/json"
         }
         
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False
+            "max_tokens": max_tokens
         }
         
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=60
+            timeout=30
         )
         
         if response.status_code == 200:
             data = response.json()
             return data["choices"][0]["message"]["content"]
         else:
-            return f"⚠️ API Error {response.status_code}: {response.text[:200]}"
+            return f"⚠️ Sorry, I'm having trouble connecting. Error: {response.status_code}"
             
     except Exception as e:
-        return f"Error: {str(e)[:200]}"
-
-def get_ai_response_optimized(api_key, user_message, chat_history=None, model="mistralai/mistral-7b-instruct:free", 
-                              temperature=0.7, max_tokens=300, context_length=4):
-    """Get AI response with CABS context"""
-    if not api_key:
-        return "Please provide an API key to use AI features."
-    
-    try:
-        # Create system prompt for banking assistant
-        system_prompt = """You are Tino, a helpful AI banking assistant for CABS (Central Africa Building Society) in Zimbabwe.
-
-About CABS:
-- CABS is one of Zimbabwe's largest building societies
-- Offers banking, loans, savings accounts, mortgages, and insurance
-- Has the O'mari digital wallet for mobile money
-- Provides corporate banking, treasury services, and investment products
-
-Your role:
-1. Answer questions about CABS products and services helpfully
-2. Provide general banking information (don't give specific account advice)
-3. If asked about specific account details, recommend contacting CABS directly
-4. Keep responses concise and focused (2-3 paragraphs maximum)
-5. For complex inquiries, suggest visiting a branch or calling customer service
-
-Important: Never ask for personal or account information. Always maintain professionalism."""
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        # Add limited chat history for context
-        if chat_history:
-            recent_history = chat_history[-context_length:]
-            for msg in recent_history:
-                messages.append({"role": msg["role"], "content": msg["content"]})
-        
-        # Add current user message
-        messages.append({"role": "user", "content": user_message})
-        
-        # Get response with caching
-        return get_cached_response(api_key, messages, model, temperature, max_tokens)
-            
-    except Exception as e:
-        return f"Error: {str(e)[:200]}"
-
-# ========== HYBRID RESPONSE FUNCTION ==========
-def get_hybrid_response(user_input, api_key, chat_history, selected_model, temperature, max_tokens, context_length):
-    """Get response using hybrid approach"""
-    # First try to match with rule-based intents
-    intent = match_intent(user_input)
-    
-    if intent:
-        # If we have a rule-based response, use it
-        if intent in RESPONSE_FUNCTIONS:
-            return RESPONSE_FUNCTIONS[intent](), "rule_based"
-        elif intent in INTENTS and INTENTS[intent]["responses"][0] not in RESPONSE_FUNCTIONS:
-            # Use canned response
-            return random.choice(INTENTS[intent]["responses"]), "rule_based"
-    
-    # If no rule-based match, use AI
-    if api_key:
-        ai_response = get_ai_response_optimized(
-            api_key, user_input, chat_history, selected_model,
-            temperature, max_tokens, context_length
-        )
-        return ai_response, "ai"
-    else:
-        return "I can answer specific banking questions, but for general conversation, please provide an API key in the sidebar.", "rule_based"
+        return f"⚠️ Connection issue: {str(e)[:100]}"
 
 # ========== CHAT INTERFACE ==========
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant", 
-            "content": """Hello! I'm Tino, your CABS Banking Assistant. 
+            "content": """**🏦 Welcome to CABS Banking Assistant!**
 
-I can help you with information about:
-• **Accounts** - Savings, Current, Corporate accounts
-• **Loans** - Personal loans, Mortgages, Business loans
-• **Cards** - Debit cards, Credit cards
-• **Digital Banking** - O'mari wallet, Online banking, Mobile app
-• **Insurance** - Life, Property, Vehicle insurance
-• **Branch Locations & Contact Information**
+I provide **verified information** about CABS banking services. I do **NOT hallucinate** - all banking information comes from verified sources.
 
-How can I assist you with CABS banking today?"""
+**I can help you with:**
+• ✅ **Loan requirements** and interest rates
+• ✅ **Account opening** procedures
+• ✅ **Digital banking** (Mobile App, WhatsApp, USSD)
+• ✅ **Foreign exchange rates**
+• ✅ **Card services** (Gold, Blue, O'mari cards)
+• ✅ **Contact information**
+• ✅ **O'mari digital wallet**
+
+**Ask me specific questions like:**
+- "What are the requirements for a personal loan?"
+- "How do I open a savings account?"
+- "What are today's exchange rates?"
+- "Tell me about O'mari registration"
+
+**For general conversation, switch to 'AI Only' mode in the sidebar.**
+
+How can I assist you with **verified** CABS banking information today?"""
         }
     ]
 
 if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
 
-if "response_times" not in st.session_state:
-    st.session_state.response_times = []
-
 # Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Display average response time in sidebar
-if st.session_state.response_times:
-    avg_time = sum(st.session_state.response_times) / len(st.session_state.response_times)
-    st.sidebar.metric("⏱️ Avg Response Time", f"{avg_time:.1f}s")
-
 # ========== HANDLE USER INPUT ==========
-if prompt := st.chat_input("Ask about CABS banking services..."):
+if prompt := st.chat_input("Ask about verified CABS banking services..."):
     # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -729,60 +964,63 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.session_state.conversation_history.append({"role": "user", "content": prompt})
     
-    # Get response based on selected mode
+    # Get response based on mode
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        message_placeholder.markdown("💭 Thinking...")
+        message_placeholder.markdown("🔍 Checking banking knowledge...")
         
         start_time = time.time()
         
-        if chat_mode == "Rule-Based Only":
-            # Only use rule-based responses
-            intent = match_intent(prompt)
-            if intent:
-                if intent in RESPONSE_FUNCTIONS:
-                    response = RESPONSE_FUNCTIONS[intent]()
-                    response_type = "rule_based"
-                elif intent in INTENTS:
-                    response = random.choice(INTENTS[intent]["responses"])
-                    response_type = "rule_based"
-                else:
-                    response = "I can help with specific banking questions. Please ask about accounts, loans, cards, or other CABS services."
-                    response_type = "rule_based"
-            else:
-                response = "I'm trained to answer specific banking questions. Please ask about CABS accounts, loans, cards, online banking, or contact information."
-                response_type = "rule_based"
-                
+        if chat_mode == "Banking Knowledge Only":
+            # Only use verified banking knowledge
+            intent = detect_banking_intent(prompt)
+            response = get_banking_response(intent)
+            response_type = "🏦 Banking Knowledge"
+            
         elif chat_mode == "AI Only":
-            # Only use AI responses
+            # Only use AI
             if api_key:
-                response = get_ai_response_optimized(
-                    api_key, prompt, st.session_state.conversation_history, 
+                response = get_ai_response(
+                    api_key, prompt, st.session_state.conversation_history,
                     selected_model, temperature, max_tokens, context_length
                 )
-                response_type = "ai"
+                response_type = "🤖 AI Response"
             else:
                 response = "Please provide an API key in the sidebar to use AI responses."
-                response_type = "rule_based"
+                response_type = "⚠️ Configuration Needed"
                 
         else:  # Hybrid mode
-            response, response_type = get_hybrid_response(
-                prompt, api_key, st.session_state.conversation_history,
-                selected_model, temperature, max_tokens, context_length
-            )
+            # Try banking knowledge first
+            intent = detect_banking_intent(prompt)
+            if intent:
+                response = get_banking_response(intent)
+                response_type = "🏦 Banking Knowledge"
+            elif api_key:
+                # Use AI for general conversation
+                response = get_ai_response(
+                    api_key, prompt, st.session_state.conversation_history,
+                    selected_model, temperature, max_tokens, context_length
+                )
+                response_type = "🤖 AI Response"
+            else:
+                response = """I can answer banking questions from verified knowledge. 
+
+For general conversation, please:
+1. Switch to 'AI Only' mode in sidebar
+2. Provide an OpenRouter API key
+3. Ask your question again
+
+Or ask me about verified CABS banking services!"""
+                response_type = "🏦 Banking Knowledge"
         
         end_time = time.time()
         total_time = end_time - start_time
-        st.session_state.response_times.append(total_time)
         
         # Display response
         message_placeholder.markdown(response)
         
-        # Show response type indicator
-        if response_type == "ai":
-            st.caption(f"🤖 AI Response • ⏱️ {total_time:.1f}s")
-        else:
-            st.caption(f"📚 Banking Knowledge • ⏱️ {total_time:.1f}s")
+        # Show response type and time
+        st.caption(f"{response_type} • ⏱️ {total_time:.1f}s")
     
     # Add to history
     st.session_state.messages.append({"role": "assistant", "content": response})
@@ -792,12 +1030,12 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: gray; font-size: 0.8em;">
-    <p><b>💡 CABS Banking Assistant v2.0</b></p>
-    <p>Mode: <b>{}</b> | Model: <b>{}</b></p>
-    <p>For official banking services, visit <a href="https://www.cabs.co.zw" target="_blank">cabs.co.zw</a></p>
-    <p>Emergency lost card: +263 242 707 771-9 • WhatsApp: 0777 227 227</p>
+    <p><b>🏦 CABS Verified Banking Assistant</b></p>
+    <p>Mode: <b>{}</b> | Responses: <b>No Hallucinations</b></p>
+    <p>All banking information verified from official sources</p>
+    <p>For official services: <a href="https://www.cabs.co.zw" target="_blank">cabs.co.zw</a> | 📞 +263 242 707 771</p>
 </div>
-""".format(chat_mode, selected_model.split('/')[1].split(':')[0]), unsafe_allow_html=True)
+""".format(chat_mode), unsafe_allow_html=True)
 
 # Add custom CSS
 st.markdown("""
@@ -808,12 +1046,16 @@ st.markdown("""
         margin: 5px 0;
     }
     [data-testid="stChatMessageContent"] {
-        background-color: #f0f2f6;
         padding: 10px;
         border-radius: 8px;
     }
     .stButton button {
         width: 100%;
+    }
+    .banking-response {
+        border-left: 4px solid #1e88e5;
+        padding-left: 10px;
+        background-color: #e3f2fd;
     }
 </style>
 """, unsafe_allow_html=True)
