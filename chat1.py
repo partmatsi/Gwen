@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-from openai import OpenAI  # Requires openai>=1.0.0
 
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="OpenRouter Chatbot", page_icon="🤖", layout="centered")
@@ -54,50 +53,76 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# ========== INITIALIZE OPENROUTER CLIENT ==========
+# ========== COMPATIBLE CLIENT INITIALIZATION ==========
 def initialize_openrouter_client(api_key):
-    """Initialize and return OpenRouter client if API key is valid"""
+    """Initialize OpenRouter client - COMPATIBLE with ALL OpenAI versions"""
     if not api_key:
         return None, "No API key provided"
     
     try:
-        # FIXED: Using correct OpenAI 1.0+ syntax
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key
-            # NO 'proxies' parameter here - that's for older versions
-        )
-        return client, "✅ Connected to OpenRouter API"
+        import openai
+        
+        # Detect OpenAI version
+        openai_version = getattr(openai, '__version__', '0.0.0')
+        
+        if openai_version.startswith('1.'):
+            # NEW STYLE: OpenAI ≥1.0.0
+            from openai import OpenAI
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key
+            )
+            return {"type": "new", "client": client}, "✅ Connected to OpenRouter API"
+        else:
+            # OLD STYLE: OpenAI <1.0.0
+            openai.api_base = "https://openrouter.ai/api/v1"
+            openai.api_key = api_key
+            return {"type": "old", "client": openai, "api_key": api_key}, "✅ Connected to OpenRouter API (legacy)"
+            
     except Exception as e:
         return None, f"❌ Connection failed: {str(e)}"
 
-# ========== AI RESPONSE FUNCTION ==========
-def get_ai_response(client, user_message, chat_history=None, model="qwen/qwen3-coder:free"):
-    """Get response from OpenRouter AI model"""
+# ========== COMPATIBLE AI RESPONSE FUNCTION ==========
+def get_ai_response(client_info, user_message, chat_history=None, model="qwen/qwen3-coder:free"):
+    """Get response from OpenRouter - COMPATIBLE with both OpenAI versions"""
     try:
         messages = []
         
+        # System prompt
         messages.append({
             "role": "system", 
             "content": "You are a helpful, friendly, and concise AI assistant. Answer the user's questions helpfully."
         })
         
+        # Add chat history
         if chat_history:
             for msg in chat_history[-6:]:
                 role = "user" if msg["role"] == "user" else "assistant"
                 messages.append({"role": role, "content": msg["content"]})
         
+        # Add current user message
         messages.append({"role": "user", "content": user_message})
         
-        # FIXED: Using correct chat completions syntax
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-        
+        # Make API call based on client type
+        if client_info["type"] == "new":
+            # NEW STYLE: OpenAI ≥1.0.0
+            response = client_info["client"].chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+        else:
+            # OLD STYLE: OpenAI <1.0.0
+            response = client_info["client"].ChatCompletion.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+            
     except Exception as e:
         return f"⚠️ Sorry, I encountered an error: {str(e)}"
 
@@ -126,12 +151,12 @@ if prompt := st.chat_input("Type your message here..."):
                 "content": "I need an API key to respond. Please enter your OpenRouter API key in the sidebar."
             })
     else:
-        client, status = initialize_openrouter_client(api_key)
+        client_info, status = initialize_openrouter_client(api_key)
         
-        if client:
+        if client_info:
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
-                    response = get_ai_response(client, prompt, st.session_state.messages, selected_model)
+                    response = get_ai_response(client_info, prompt, st.session_state.messages, selected_model)
                     st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
         else:
