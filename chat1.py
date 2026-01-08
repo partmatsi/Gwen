@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from openai import OpenAI  # OpenRouter uses an OpenAI-compatible API
+from openai import OpenAI  # Requires openai>=1.0.0
 
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="OpenRouter Chatbot", page_icon="🤖", layout="centered")
@@ -61,9 +61,11 @@ def initialize_openrouter_client(api_key):
         return None, "No API key provided"
     
     try:
+        # FIXED: Using correct OpenAI 1.0+ syntax
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key
+            # NO 'proxies' parameter here - that's for older versions
         )
         return client, "✅ Connected to OpenRouter API"
     except Exception as e:
@@ -87,6 +89,7 @@ def get_ai_response(client, user_message, chat_history=None, model="qwen/qwen3-c
         
         messages.append({"role": "user", "content": user_message})
         
+        # FIXED: Using correct chat completions syntax
         response = client.chat.completions.create(
             model=model,
             messages=messages,
