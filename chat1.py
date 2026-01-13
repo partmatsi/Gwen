@@ -8,7 +8,7 @@ from datetime import datetime
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="CABSChat", layout="centered")
 st.title("💬 CABS Banking Chat Assistant")
-st.caption("Ask me about Products, Accounts, Loans, Cards, Online Banking, Branch Locations, O'mari digital wallet, Insurance or any CABS services!")
+st.markdown("Ask me about Products, Accounts, Loans, Cards, Online Banking, Branch Locations, O'mari digital wallet, Insurance or any CABS services!")
 
 # ========== SIDEBAR CONFIGURATION ==========
 with st.sidebar:
@@ -186,23 +186,9 @@ def get_ai_response_optimized(api_key, user_message, chat_history=None, model="m
         return f"Error: {str(e)[:200]}", 0
 
 # ========== CHAT INTERFACE ==========
+# Initialize empty chat history
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant", 
-            "content": """Hello! I'm CABS Assistant, your virtual banking helper. 
-
-I can help you with information about:
-• **Accounts** - Savings, Current, Corporate accounts
-• **Loans** - Personal loans, Mortgages, Business loans
-• **Cards** - Debit cards, Credit cards
-• **Digital Banking** - O'mari wallet, Online banking, Mobile app
-• **Insurance** - Life, Property, Vehicle insurance
-• **Branch Locations & Contact Information**
-
-How can I assist you with CABS banking today?"""
-        }
-    ]
+    st.session_state.messages = []
 
 if "response_times" not in st.session_state:
     st.session_state.response_times = []
@@ -272,17 +258,7 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
         # Add to history
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-# ========== FOOTER ==========
-st.divider()
-st.markdown("""
-<div style="text-align: center; color: gray; font-size: 0.8em;">
-    <p>💡 <b>Tips for faster responses:</b></p>
-    <p>• Use shorter, specific questions</p>
-    <p>• Try the 'gemma-2-2b-it' model for fastest responses</p>
-    <p>• Reduce 'Chat history' in sidebar for shorter context</p>
-    <p>• Responses may be slower during peak hours</p>
-</div>
-""", unsafe_allow_html=True)
+# ========== FOOTER ==========                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
 
 # Add CSS for better loading experience
 st.markdown("""
