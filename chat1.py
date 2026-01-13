@@ -106,8 +106,13 @@ def get_cached_response(api_key, messages, model, temperature, max_tokens):
         
         if response.status_code == 200:
             data = response.json()
+            # Clean the response to remove <s> tokens
+            response_text = data["choices"][0]["message"]["content"]
+            # Remove <s> and </s> tags from the response
+            response_text = response_text.replace('<s>', '').replace('</s>', '').strip()
+            
             return {
-                "response": data["choices"][0]["message"]["content"],
+                "response": response_text,
                 "time": elapsed_time,
                 "cached": False
             }
