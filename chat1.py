@@ -186,9 +186,14 @@ def get_ai_response_optimized(api_key, user_message, chat_history=None, model="m
         return f"Error: {str(e)[:200]}", 0
 
 # ========== CHAT INTERFACE ==========
-# Initialize empty chat history
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [
+        {
+            "role": "assistant", 
+            "content": """Hello! How can I assist you with CABS banking today?. 
+"""
+        }
+    ]
 
 if "response_times" not in st.session_state:
     st.session_state.response_times = []
@@ -199,9 +204,9 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Display average response time in sidebar
-if st.session_state.response_times:
-    avg_time = sum(st.session_state.response_times) / len(st.session_state.response_times)
-    st.sidebar.metric("⏱️ Average Response Time", f"{avg_time:.1f}s")
+#if st.session_state.response_times:
+    #avg_time = sum(st.session_state.response_times) / len(st.session_state.response_times)
+    #st.sidebar.metric("⏱️ Average Response Time", f"{avg_time:.1f}s")
 
 # ========== HANDLE USER INPUT ==========
 if prompt := st.chat_input("Ask about CABS banking services..."):
@@ -253,12 +258,12 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
             message_placeholder.markdown(response)
             
             # Show timing info (optional, can be removed)
-            st.caption(f"⏱️ Response time: {total_time:.1f}s")
+            #st.caption(f"⏱️ Response time: {total_time:.1f}s")
         
         # Add to history
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-# ========== FOOTER ==========                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+
 
 # Add CSS for better loading experience
 st.markdown("""
