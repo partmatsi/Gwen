@@ -4,53 +4,11 @@ import requests
 import json
 import time
 from datetime import datetime
-import re  # Added for text cleaning
 
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="CABSChat", layout="centered")
 st.title("💬 CABS Banking Chat Assistant")
 st.markdown("Ask me about Products, Accounts, Loans, Cards, Online Banking, Branch Locations, O'mari digital wallet, Insurance or any CABS services!")
-
-# ========== CLEAN RESPONSE FUNCTION ==========
-def clean_response_text(response_text):
-    """
-    Clean the response text by removing special tokens and formatting artifacts.
-    This addresses the <s> tag issue and other model-specific artifacts.
-    """
-    if not response_text:
-        return response_text
-    
-    # Remove common special tokens from various models
-    special_tokens = [
-        r'<s>', r'</s>', r'<\|.*?\|>',  # Common token patterns
-        r'\[INST\].*?\[/INST\]',  # Instruction tokens
-        r'\*\*.*?\*\*:\s*',  # Some models add **label:** format
-    ]
-    
-    # Apply cleaning patterns
-    cleaned_text = response_text
-    
-    # Remove XML/HTML-like tags including <s>
-    cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
-    
-    # Remove other special patterns
-    for pattern in special_tokens:
-        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL)
-    
-    # Clean up whitespace
-    cleaned_text = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_text)  # Multiple newlines
-    cleaned_text = re.sub(r'^\s+', '', cleaned_text)  # Leading whitespace
-    cleaned_text = re.sub(r'\s+$', '', cleaned_text)  # Trailing whitespace
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Extra spaces
-    
-    # Ensure proper paragraph formatting
-    cleaned_text = cleaned_text.strip()
-    
-    # If cleaning removed everything, return original
-    if not cleaned_text:
-        return response_text.strip()
-    
-    return cleaned_text
 
 # ========== SIDEBAR CONFIGURATION ==========
 with st.sidebar:
@@ -148,47 +106,33 @@ def get_cached_response(api_key, messages, model, temperature, max_tokens):
         
         if response.status_code == 200:
             data = response.json()
-            raw_response = data["choices"][0]["message"]["content"]
-            
-            # Clean the response before returning
-            cleaned_response = clean_response_text(raw_response)
-            
             return {
-                "response": cleaned_response,
-                "raw_response": raw_response,  # Keep original for debugging
+                "response": data["choices"][0]["message"]["content"],
                 "time": elapsed_time,
                 "cached": False
             }
         elif response.status_code == 429:  # Rate limit
-            error_message = f"⚠️ Rate limit exceeded. Please wait a moment and try again. (Took {elapsed_time:.1f}s)"
             return {
-                "response": error_message,
-                "raw_response": error_message,
+                "response": f"⚠️ Rate limit exceeded. Please wait a moment and try again. (Took {elapsed_time:.1f}s)",
                 "time": elapsed_time,
                 "cached": False
             }
         else:
-            error_message = f"Error {response.status_code}: {response.text[:200]} (Took {elapsed_time:.1f}s)"
             return {
-                "response": error_message,
-                "raw_response": error_message,
+                "response": f"Error {response.status_code}: {response.text[:200]} (Took {elapsed_time:.1f}s)",
                 "time": elapsed_time,
                 "cached": False
             }
             
     except requests.exceptions.Timeout:
-        error_message = "⚠️ Request timed out. The model might be busy. Please try again."
         return {
-            "response": error_message,
-            "raw_response": error_message,
+            "response": "⚠️ Request timed out. The model might be busy. Please try again.",
             "time": 60,
             "cached": False
         }
     except Exception as e:
-        error_message = f"Error: {str(e)[:200]}"
         return {
-            "response": error_message,
-            "raw_response": error_message,
+            "response": f"Error: {str(e)[:200]}",
             "time": 0,
             "cached": False
         }
@@ -246,8 +190,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant", 
-            "content": """
-
+            "content": """ 
 """
         }
     ]
@@ -335,28 +278,6 @@ st.markdown("""
     }
     [data-testid="stChatMessage"]:has(> [data-testid="stChatMessageContent"] > div > div > p) {
         background-color: #f0f2f6;
-    }
-    
-    /* Mobile-specific optimizations */
-    @media (max-width: 768px) {
-        .stChatMessage {
-            padding: 8px !important;
-            margin: 4px 0 !important;
-        }
-        
-        .stChatInput > div > div {
-            padding: 8px !important;
-        }
-        
-        h1 {
-            font-size: 1.5rem !important;
-        }
-        
-        /* Ensure cleaned text displays properly on mobile */
-        .stMarkdown p {
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
     }
 </style>
 """, unsafe_allow_html=True)
