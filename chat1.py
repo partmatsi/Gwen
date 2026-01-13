@@ -51,8 +51,8 @@ with st.sidebar:
     st.divider()
     st.subheader("⚡ Performance")
     
-    # Reduce context length for faster responses
-    context_length = st.slider("Chat history (messages to remember):", 2, 10, 4)
+    # Reduce context length for faster responses - DEFAULT CHANGED TO 9
+    context_length = st.slider("Chat history (messages to remember):", 2, 10, 9)  # Changed from 4 to 9
     
     max_tokens = st.slider("Max response length:", 100, 1000, 300, 50)
     
@@ -138,7 +138,7 @@ def get_cached_response(api_key, messages, model, temperature, max_tokens):
         }
 
 def get_ai_response_optimized(api_key, user_message, chat_history=None, model="mistralai/mistral-7b-instruct:free", 
-                              temperature=0.7, max_tokens=300, context_length=4):
+                              temperature=0.7, max_tokens=300, context_length=9):  # Default changed to 9
     """Optimized AI response with caching and performance improvements"""
     if not api_key:
         return "Please provide an API key", 0
@@ -190,7 +190,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant", 
-            "content": """Hello! How can I assist you with CABS banking today?. 
+            "content": """ 
 """
         }
     ]
@@ -231,7 +231,7 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
             message_placeholder.markdown("💭 Thinking...")
             
             # Get sidebar settings
-            context_len = context_length if 'context_length' in locals() else 4
+            context_len = context_length if 'context_length' in locals() else 9  # Default changed to 9
             max_tokens_val = max_tokens if 'max_tokens' in locals() else 300
             temp_val = temperature if 'temperature' in locals() else 0.7
             
