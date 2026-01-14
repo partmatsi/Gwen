@@ -2510,20 +2510,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant", 
-            "content": """Hello! I'm **Tino**, your CABS Banking Assistant. 🏦
-
-I can help you with:
-• **Account Information** (opening, types, fees)
-• **Loan Services** (personal, civil servants, home loans)
-• **Digital Banking** (O'mari, mobile banking, USSD)
-• **Card Services** (debit cards, O'mari cards)
-• **Branch Locations** (nationwide branches)
-• **Exchange Rates** (current forex rates)
-• **Insurance Products** (bancassurance)
-• **Investment Services**
-• **Contact Information**
-
-**How can I assist you with your banking needs today?**"""
+            "content": """
+"""
         }
     ]
 
@@ -2573,7 +2561,7 @@ if prompt := st.chat_input("Ask about CABS banking services..."):
             message_placeholder.markdown(response)
             
             # Show timing info
-            st.caption(f"⏱️ Response time: {total_time:.1f}s")
+            #st.caption(f"⏱️ Response time: {total_time:.1f}s")
         
         # Add to history
         st.session_state.messages.append({"role": "assistant", "content": response})
